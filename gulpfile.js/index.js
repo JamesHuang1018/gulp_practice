@@ -44,10 +44,7 @@ function buildTS(file, isWatchify, watchBrowserify) {
     );
 
     return b
-        .transform("babelify", {
-            presets: ["es2015"],
-            extensions: [".ts"],
-        })
+        .transform("babelify", config.babel)
         .bundle()
         .on("error", console.error)
         .pipe(source("bundle.js"))

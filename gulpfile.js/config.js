@@ -4,6 +4,10 @@ const basePath = ".",
     nodePath = "./node_modules";
 
 let envConfig = {
+    babel: {
+        presets: ["es2015"],
+        extensions: [".ts"],
+    },
     browserSync: {
         server: {
             baseDir: basePath,
