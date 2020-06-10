@@ -16,60 +16,98 @@ var clean = require('gulp-clean'); //清除檔案
 var concat = require('gulp-concat'); //合併檔案
 var browserSync = require('browser-sync').create();
 var eslint = require('gulp-eslint');
+var babel = require('gulp-babel'); //JS轉譯
 
 var { srcPath, distPath, nodePath, config } = require('./config');
 
-function buildTS(file, isWatchify, watchBrowserify) {
-  const path =
-      file ||
-      (() => {
-        throw new Error('尚未指定轉換的檔案路徑');
-      })(),
-    outputPath = path.split('/').slice(0, -1).join('/'),
-    fileName = path.split('/').reverse()[0];
+const buildTS = function (file, isWatchify, watchBrowserify) {
+    const path =
+        file ||
+        (() => {
+          throw new Error('尚未指定轉換的檔案路徑');
+        })(),
+      outputPath = path.split('/').slice(0, -1).join('/'),
+      fileName = path.split('/').reverse()[0];
 
-  config.browserify.entries = file;
+    config.browserify.entries = file;
 
-  let b = watchBrowserify || browserify(config.browserify).plugin(tsify);
+    let b = watchBrowserify || browserify(config.browserify).plugin(tsify);
 
-  if (isWatchify) {
-    b = watchify(b, config.watchify);
+    if (isWatchify) {
+      b = watchify(b, config.watchify);
 
-    fancy_log.info('\x1b[32m', 'use watchify');
+      fancy_log.info('\x1b[32m', 'use watchify');
 
-    b.on('update', buildTS.bind(null, file, false, b));
-    b.on('log', fancy_log);
-  }
+      b.on('update', buildTS.bind(null, file, false, b));
+      b.on('log', fancy_log);
+    }
 
-  fancy_log.info('\x1b[32m', `build info: path=> ${path}, fileName=> ${fileName},isWatchify=>${isWatchify}`);
+    fancy_log.info('\x1b[32m', `build info: path=> ${path}, fileName=> ${fileName},isWatchify=>${isWatchify}`);
 
-  return b
-    .transform('babelify', config.babel)
-    .bundle()
-    .on('error', function (err) {
-      fancy_log.error('\x1b[31m', err);
-      process.exit(-1);
-    })
-    .pipe(source('bundle.js'))
-    .pipe(plumber())
-    .pipe(buffer())
-    .pipe(
-      rename(function (path) {
-        path.basename = fileName.replace('.ts', '');
-        path.extname = '.bundle.js';
+    return b
+      .transform('babelify', config.babel)
+      .bundle()
+      .on('error', function (err) {
+        fancy_log.error('\x1b[31m', err);
       })
-    )
-    .pipe(sourcemaps.init({ loadMaps: true }))
-    .pipe(uglify())
-    .pipe(sourcemaps.write('./'))
-    .pipe(plumber.stop())
-    .pipe(gulp.dest(`${distPath}/${outputPath}`))
-    .pipe(browserSync.stream());
-}
-
-function lint(file) {
-  return gulp.src(file).pipe(eslint()).pipe(eslint.format()).pipe(eslint.failOnError());
-}
+      .pipe(source('bundle.js'))
+      .pipe(plumber())
+      .pipe(buffer())
+      .pipe(
+        rename(function (path) {
+          path.basename = fileName.replace('.ts', '');
+          path.extname = '.bundle.js';
+        })
+      )
+      .pipe(sourcemaps.init({ loadMaps: true }))
+      .pipe(uglify())
+      .pipe(sourcemaps.write('./'))
+      .pipe(plumber.stop())
+      .pipe(gulp.dest(`${distPath}/${outputPath}`))
+      .pipe(browserSync.stream());
+  },
+  lint = function (file) {
+    return gulp.src(file).pipe(eslint()).pipe(eslint.format()).pipe(eslint.failOnError());
+  },
+  bundleJs = function (paths, bundelName) {
+    return gulp
+      .src(paths)
+      .pipe(babel({ presets: config.babel.presets, compact: false })) //在bundle JS時，需要再用babel轉譯過 (與babelify意思一樣，但參數設定不同，所以在config抓取部分獨立抓出presets)
+      .pipe(plumber())
+      .pipe(sourcemaps.init({ loadMaps: true }))
+      .pipe(concat(bundelName)) //合併指定檔案
+      .pipe(uglify())
+      .pipe(sourcemaps.write('./'))
+      .pipe(plumber.stop())
+      .pipe(gulp.dest(config.vendors.distJS));
+  },
+  bundleCss = function (paths, bundelName) {
+    return gulp
+      .src(paths)
+      .pipe(plumber())
+      .pipe(sourcemaps.init({ loadMaps: true }))
+      .pipe(concat(bundelName))
+      .pipe(minifyCSS())
+      .pipe(sourcemaps.write('./'))
+      .pipe(plumber.stop())
+      .pipe(gulp.dest(config.vendors.distCss));
+  },
+  bundleVendors = gulp.parallel(
+    function () {
+      return bundleJs(config.vendors.js, config.vendors.jsName);
+    },
+    function () {
+      return bundleCss(config.vendors.css, config.vendors.cssName);
+    }
+  ),
+  bundleCommons = gulp.parallel(
+    function () {
+      return bundleJs(config.commons.js, config.commons.jsName);
+    },
+    function () {
+      return bundleCss(config.commons.css, config.commons.cssName);
+    }
+  );
 
 function dev() {
   const filePath =
@@ -113,34 +151,6 @@ function buildFile() {
   });
 }
 
-function vendorsJs() {
-  return gulp
-    .src(config.vendors.js)
-    .pipe(plumber())
-    .pipe(sourcemaps.init({ loadMaps: true }))
-    .pipe(concat(config.vendors.concatJs))
-    .pipe(uglify())
-    .pipe(sourcemaps.write('./'))
-    .pipe(plumber.stop())
-    .pipe(gulp.dest(config.vendors.distJS));
-}
-
-function vendorsCss() {
-  return gulp
-    .src(config.vendors.css)
-    .pipe(plumber())
-    .pipe(sourcemaps.init({ loadMaps: true }))
-    .pipe(concat(config.vendors.concatCss))
-    .pipe(
-      minifyCSS({
-        keepBreaks: true,
-      })
-    )
-    .pipe(sourcemaps.write('./'))
-    .pipe(plumber.stop())
-    .pipe(gulp.dest(config.vendors.distCss));
-}
-
 function lintAll() {
   return lint(config.TS.src);
 }
@@ -156,4 +166,6 @@ function cleanFile() {
 
 exports.default = gulp.series(lintAll, gulp.parallel(dev, watchs), serve);
 
-exports.build = gulp.series(lintAll, cleanFile, gulp.parallel(buildFile, vendorsJs, vendorsCss));
+exports.build = gulp.series(lintAll, cleanFile, gulp.parallel(buildFile, bundleVendors, bundleCommons));
+
+exports.vendors = gulp.series(cleanFile, gulp.parallel(bundleVendors, bundleCommons));
